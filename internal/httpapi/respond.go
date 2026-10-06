@@ -78,7 +78,9 @@ func statusCode(code domain.ErrorCode) int {
 		return http.StatusConflict
 	case domain.CodeNoProbes:
 		return http.StatusUnprocessableEntity
-	case domain.CodeStorageFailure, domain.CodeInternal:
+	case domain.CodeStorageFailure,
+		domain.CodeSchemaIncompatible,
+		domain.CodeInternal:
 		return http.StatusInternalServerError
 	default:
 		return http.StatusInternalServerError

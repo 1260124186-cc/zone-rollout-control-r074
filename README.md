@@ -164,7 +164,7 @@ curl -sS -X PATCH http://127.0.0.1:8090/v1/plans/<plan_id>/assessments \
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/healthz` | 进程健康检查 |
+| `GET` | `/healthz` | 进程健康检查（快照时点、规模、提交结果、租约滞后、可读/可写/格式不兼容） |
 | `PUT` | `/v1/nodes` | 登记解析节点 |
 | `GET` | `/v1/nodes` | 按状态和区域分页查询节点 |
 | `PUT` | `/v1/plans` | 创建计划草稿 |
@@ -178,6 +178,47 @@ curl -sS -X PATCH http://127.0.0.1:8090/v1/plans/<plan_id>/assessments \
 | `PATCH` | `/v1/leases/{id}/probes` | 登记探针并完成租约 |
 | `PATCH` | `/v1/plans/{id}/assessments` | 创建一致性判定 |
 | `GET` | `/v1/plans/{id}/assessments/latest` | 查询最近判定 |
+
+### 健康检查响应
+
+`GET /healthz` 在同一读锁时点返回快照进度、当前规模、最近一次提交结果和租约清扫滞后情况。顶层 `status` 保持兼容：
+
+- `ok`（HTTP 200）：快照可读、存储可写、格式受支持。
+- `read_only`（HTTP 503）：快照可读且格式兼容，但存储探测显示当前无法提交。
+- `incompatible`（HTTP 503）：快照的 `schema_version` 不是本进程支持的版本；数据仍可读取，但所有写入都会以 `schema_incompatible` 被拒绝，快照不会被重写。
+- `unavailable`（HTTP 503）：快照读取本身不可用。
+
+```json
+{
+  "data": {
+    "status": "ok",
+    "observed_at": "2026-10-05T16:13:04Z",
+    "revision": 2,
+    "schema_version": 1,
+    "supported_schema_version": 1,
+    "counts": {
+      "plans": 1, "revisions": 0, "nodes": 1, "leases": 0,
+      "lease_groups": 0, "probes": 0, "assessments": 0, "audit_events": 2
+    },
+    "last_commit": {"revision": 2, "success": true, "committed_at": "2026-10-05T16:13:04Z"},
+    "expired_active_leases": 0,
+    "expired_leases_limited": false,
+    "expired_lease_scan_limit": 10000,
+    "storage": {
+      "readable": true,
+      "writable": true,
+      "format_incompatible": false
+    }
+  }
+}
+```
+
+说明：
+
+- 修订号、schema、计数和最近提交结果在同一次读锁快照内取得，与并发写入互不撕裂。
+- 可写探测只在快照目录创建并清理临时文件（写入、fsync、rename、fsync 目录、删除），不创建计划、租约或审计，也不推进修订号。
+- 核心实体计数来自映射长度，始终精确；`expired_active_leases` 统计已过 `expires_at` 但仍是 `claimed` 的租约，扫描设有 `expired_lease_scan_limit` 上限，超限通过 `expired_leases_limited` 标记。
+- 进程首次启动且没有发生过提交时 `last_commit` 为 `null`。
 
 ## 状态及失败行为
 

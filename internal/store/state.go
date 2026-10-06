@@ -2,7 +2,8 @@ package store
 
 import "solo-0014-zone-rollout-control/internal/domain"
 
-const schemaVersion = 1
+// SupportedSchemaVersion is the snapshot format this process reads and writes.
+const SupportedSchemaVersion = 1
 
 func blankState() domain.State {
 	return normalize(domain.State{})
@@ -10,7 +11,7 @@ func blankState() domain.State {
 
 func normalize(state domain.State) domain.State {
 	if state.SchemaVersion == 0 {
-		state.SchemaVersion = schemaVersion
+		state.SchemaVersion = SupportedSchemaVersion
 	}
 	if state.Plans == nil {
 		state.Plans = make(map[string]domain.RolloutPlan)

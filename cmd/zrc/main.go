@@ -61,7 +61,7 @@ func run() error {
 	allocations := allocation.New(stateStore, clock, ids)
 	probes := probe.New(stateStore, clock, ids, allocations)
 	assessments := assessment.New(stateStore, clock, ids)
-	api := httpapi.New(plans, nodes, allocations, probes, assessments, ids, logger)
+	api := httpapi.New(stateStore, plans, nodes, allocations, probes, assessments, ids, clock, logger)
 
 	server := &http.Server{
 		Addr:              address,

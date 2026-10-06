@@ -14,9 +14,11 @@ import (
 )
 
 type Store struct {
-	mu    sync.RWMutex
-	path  string
-	state domain.State
+	mu             sync.RWMutex
+	path           string
+	state          domain.State
+	schemaMismatch bool
+	lastCommit     *CommitResult
 }
 
 func Open(path string) (*Store, error) {
@@ -24,12 +26,14 @@ func Open(path string) (*Store, error) {
 		return nil, errors.New("snapshot path is required")
 	}
 	state := blankState()
+	schemaMismatch := false
 	payload, err := os.ReadFile(path)
 	switch {
 	case err == nil:
 		if err := json.Unmarshal(payload, &state); err != nil {
 			return nil, fmt.Errorf("decode snapshot: %w", err)
 		}
+		schemaMismatch = state.SchemaVersion != SupportedSchemaVersion
 		state = normalize(state)
 	case errors.Is(err, os.ErrNotExist):
 		if err := replaceFile(path, state); err != nil {
@@ -38,7 +42,14 @@ func Open(path string) (*Store, error) {
 	default:
 		return nil, fmt.Errorf("read snapshot: %w", err)
 	}
-	return &Store{path: path, state: state}, nil
+	// An unsupported schema version keeps the snapshot readable for health
+	// diagnostics but blocks every commit so a newer format is never
+	// rewritten (and possibly downgraded) by this process.
+	return &Store{
+		path:           path,
+		state:          state,
+		schemaMismatch: schemaMismatch,
+	}, nil
 }
 
 func (s *Store) Path() string {
@@ -85,8 +96,15 @@ func (s *Store) Write(ctx context.Context, fn func(*domain.State) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if s.schemaMismatch {
+		return domain.NewError(domain.CodeSchemaIncompatible, "snapshot schema version is not supported by this process", map[string]any{
+			"schema_version":           s.state.SchemaVersion,
+			"supported_schema_version": SupportedSchemaVersion,
+		})
+	}
 	next, err := copyState(&s.state)
 	if err != nil {
+		s.recordCommitLocked(false, s.state.Revision, "could not copy state: "+err.Error())
 		return domain.NewError(domain.CodeStorageFailure, "could not copy state", map[string]any{
 			"reason": err.Error(),
 		})
@@ -94,15 +112,28 @@ func (s *Store) Write(ctx context.Context, fn func(*domain.State) error) error {
 	if err := fn(&next); err != nil {
 		return err
 	}
-	next.SchemaVersion = schemaVersion
+	next.SchemaVersion = SupportedSchemaVersion
 	next.Revision = s.state.Revision + 1
 	if err := replaceFile(s.path, next); err != nil {
+		s.recordCommitLocked(false, next.Revision, "could not persist state: "+err.Error())
 		return domain.NewError(domain.CodeStorageFailure, "could not persist state", map[string]any{
 			"reason": err.Error(),
 		})
 	}
 	s.state = next
+	s.recordCommitLocked(true, next.Revision, "")
 	return nil
+}
+
+// recordCommitLocked records the outcome of the persistence phase of a
+// transaction. Callers must hold s.mu.
+func (s *Store) recordCommitLocked(success bool, revision uint64, detail string) {
+	s.lastCommit = &CommitResult{
+		Revision:    revision,
+		Success:     success,
+		Error:       detail,
+		CommittedAt: time.Now().UTC(),
+	}
 }
 
 func copyState(source *domain.State) (domain.State, error) {

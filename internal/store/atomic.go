@@ -7,6 +7,43 @@ import (
 	"path/filepath"
 )
 
+// probeDirectoryWrite proves the snapshot directory is writable without
+// touching the snapshot or any business entity. It creates a uniquely named
+// hidden probe file, writes and fsyncs it, closes and removes it. A leftover
+// file can only appear if the process is killed mid-probe and is clearly
+// marked as a removable health probe.
+func probeDirectoryWrite(snapshotPath string) error {
+	directory := filepath.Dir(snapshotPath)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		return fmt.Errorf("create snapshot directory: %w", err)
+	}
+	temp, err := os.CreateTemp(directory, ".health-writable-probe-*")
+	if err != nil {
+		return fmt.Errorf("create writability probe: %w", err)
+	}
+	tempPath := temp.Name()
+	remove := func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}
+	if _, err := temp.Write([]byte("ok\n")); err != nil {
+		remove()
+		return fmt.Errorf("write writability probe: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		remove()
+		return fmt.Errorf("sync writability probe: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return fmt.Errorf("close writability probe: %w", err)
+	}
+	if err := os.Remove(tempPath); err != nil {
+		return fmt.Errorf("remove writability probe: %w", err)
+	}
+	return nil
+}
+
 func replaceFile(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("create snapshot directory: %w", err)

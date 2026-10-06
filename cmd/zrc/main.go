@@ -15,6 +15,7 @@ import (
 	"solo-0014-zone-rollout-control/internal/allocation"
 	"solo-0014-zone-rollout-control/internal/assessment"
 	"solo-0014-zone-rollout-control/internal/fleet"
+	"solo-0014-zone-rollout-control/internal/health"
 	"solo-0014-zone-rollout-control/internal/httpapi"
 	"solo-0014-zone-rollout-control/internal/plan"
 	"solo-0014-zone-rollout-control/internal/platform"
@@ -50,18 +51,19 @@ func run() error {
 	}
 	defer lock.Unlock()
 
-	stateStore, err := store.Open(snapshotPath)
+	clock := platform.SystemClock{}
+	stateStore, err := store.Open(snapshotPath, clock)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	clock := platform.SystemClock{}
 	ids := platform.CryptoIDGenerator{}
 	plans := plan.New(stateStore, clock, ids)
 	nodes := fleet.New(stateStore, clock, ids)
 	allocations := allocation.New(stateStore, clock, ids)
 	probes := probe.New(stateStore, clock, ids, allocations)
 	assessments := assessment.New(stateStore, clock, ids)
-	api := httpapi.New(plans, nodes, allocations, probes, assessments, ids, logger)
+	healthCheck := health.New(stateStore)
+	api := httpapi.New(plans, nodes, allocations, probes, assessments, healthCheck, ids, logger)
 
 	server := &http.Server{
 		Addr:              address,

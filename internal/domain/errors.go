@@ -20,6 +20,7 @@ const (
 	CodeNoProbes            ErrorCode = "no_probes"
 	CodeConflict            ErrorCode = "conflict"
 	CodeStorageFailure      ErrorCode = "storage_failure"
+	CodeIncompatibleSchema  ErrorCode = "incompatible_schema"
 	CodeInternal            ErrorCode = "internal_error"
 )
 

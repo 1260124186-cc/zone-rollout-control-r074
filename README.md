@@ -162,9 +162,55 @@ curl -sS -X PATCH http://127.0.0.1:8090/v1/plans/<plan_id>/assessments \
 }
 ```
 
+### 健康检查 `GET /healthz`
+
+健康读取在存储读锁内一次性采集，返回同一时点的快照修订、schema 版本、核心实体计数、最近一次事务提交结果和已到期但仍是 `claimed` 的活动租约数；存储检查不会创建计划、租约或审计事件，只在快照目录写入并立即删除一个临时探针文件。
+
+- 能力区分：`readable`、`writable`、`format_compatible` 三个布尔值分别表示快照可读、快照目录可写和快照格式为本构建支持；聚合 `status` 为 `ok`、`read_only`、`format_incompatible`、`degraded`（内存与磁盘修订不一致）或 `unavailable`（快照不可读）。非 `ok` 时返回 HTTP 503，`status` 字段在健康时仍为 `"ok"`，兼容旧客户端。
+- `snapshot` 给出内存与磁盘修订和 schema 版本以及 `durable_in_sync`；`last_commit` 给出最近一次事务的时间、是否成功、尝试/提交修订和失败错误码。
+- 每个计数都是 `{value, capacity, truncated}`，容量上限固定为 1,000,000，超限后 `value` 取上限且 `truncated` 为真，顶层 `truncated` 汇总任一计数触顶。
+
+```json
+{
+  "data": {
+    "status": "ok",
+    "checked_at": "2026-10-05T12:00:00Z",
+    "readable": true,
+    "writable": true,
+    "format_compatible": true,
+    "snapshot": {
+      "revision": 17,
+      "durable_revision": 17,
+      "schema_version": 1,
+      "supported_schema_version": 1,
+      "durable_in_sync": true
+    },
+    "counts": {
+      "plans": {"value": 1, "capacity": 1000000, "truncated": false},
+      "revisions": {"value": 1, "capacity": 1000000, "truncated": false},
+      "nodes": {"value": 2, "capacity": 1000000, "truncated": false},
+      "leases": {"value": 2, "capacity": 1000000, "truncated": false},
+      "lease_groups": {"value": 1, "capacity": 1000000, "truncated": false},
+      "probes": {"value": 0, "capacity": 1000000, "truncated": false},
+      "assessments": {"value": 0, "capacity": 1000000, "truncated": false},
+      "audit_events": {"value": 6, "capacity": 1000000, "truncated": false}
+    },
+    "expired_active_leases": {"value": 0, "capacity": 1000000, "truncated": false},
+    "truncated": false,
+    "last_commit": {
+      "at": "2026-10-05T12:00:00Z",
+      "success": true,
+      "attempted_revision": 17,
+      "committed_revision": 17
+    }
+  },
+  "meta": {"request_id": "req_..."}
+}
+```
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/healthz` | 进程健康检查 |
+| `GET` | `/healthz` | 时点健康检查（修订、schema、计数、最近提交与存储能力） |
 | `PUT` | `/v1/nodes` | 登记解析节点 |
 | `GET` | `/v1/nodes` | 按状态和区域分页查询节点 |
 | `PUT` | `/v1/plans` | 创建计划草稿 |

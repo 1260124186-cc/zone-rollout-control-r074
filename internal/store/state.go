@@ -8,6 +8,17 @@ func blankState() domain.State {
 	return normalize(domain.State{})
 }
 
+// normalizeReadOnly fills absent collections on a decoded snapshot while
+// preserving its schema version, unlike normalize which defaults an unknown
+// schema to the current one. Used when opening snapshots that may originate
+// from a newer build.
+func normalizeReadOnly(state domain.State) domain.State {
+	schema := state.SchemaVersion
+	state = normalize(state)
+	state.SchemaVersion = schema
+	return state
+}
+
 func normalize(state domain.State) domain.State {
 	if state.SchemaVersion == 0 {
 		state.SchemaVersion = schemaVersion
